@@ -712,6 +712,10 @@ func (v Value) Len() int {
 	return len(x)
 }
 
+func (v Value) Resolve(x interface{}) Value {
+	return v.r.resolve(v.ptr, x)
+}
+
 func (r *Reader) resolve(parent objptr, x interface{}) Value {
 	if ptr, ok := x.(objptr); ok {
 		if ptr.id >= uint32(len(r.xref)) {
