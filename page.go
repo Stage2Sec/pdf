@@ -81,6 +81,14 @@ func (r *Reader) GetPlainText() (reader io.Reader, err error) {
 	return &buf, nil
 }
 
+func (r *Reader) GetTableData(table *TableDef) ([][]string, error) {
+	var rows [][]string
+	err := table.parse(r, func(cells []string) {
+		rows = append(rows, cells)
+	})
+	return rows, err
+}
+
 func (p Page) findInherited(key string) Value {
 	for v := p.V; !v.IsNull(); v = v.Key("Parent") {
 		if r := v.Key(key); !r.IsNull() {
@@ -777,6 +785,94 @@ func (p Page) walkTextBlocks(walker func(enc TextEncoding, x, y float64, s strin
 			currentY = args[5].Float64()
 		}
 	})
+}
+
+type rectSet struct {
+	set map[Rect]bool
+}
+
+func (set *rectSet) add(r Rect) bool {
+	_, found := set.set[r]
+	set.set[r] = true
+	return !found
+}
+
+type RectText struct {
+	Rect Rect
+	S    string
+}
+
+func (p Page) GetTextByRect(do func(currentPoint Point, accumText string)) []*RectText {
+	set := &rectSet{
+		set: make(map[Rect]bool),
+	}
+	texts := make([]*RectText, 0)
+	getOrAdd := func(rect Rect) *RectText {
+		var text *RectText
+		if set.add(rect) {
+			text = &RectText{Rect: rect}
+			texts = append(texts, text)
+		} else {
+			for _, t := range texts {
+				if rect == t.Rect {
+					text = t
+					break
+				}
+			}
+		}
+		return text
+	}
+
+	fonts := make(map[string]*Font)
+	for _, font := range p.Fonts() {
+		f := p.Font(font)
+		fonts[font] = &f
+	}
+
+	var enc TextEncoding = &nopEncoder{}
+	var currentRectText *RectText
+	currentPoint := Point{}
+	Interpret(p.V.Key("Contents"), func(stack *Stack, op string) {
+		n := stack.Len()
+		args := make([]Value, n)
+		for i := n - 1; i >= 0; i-- {
+			args[i] = stack.Pop()
+		}
+
+		switch op {
+		default:
+			return
+		case "Tf": // set text font and size
+			if len(args) != 2 {
+				panic("bad TL")
+			}
+
+			if font, ok := fonts[args[0].Name()]; ok {
+				enc = font.Encoder()
+			} else {
+				enc = &nopEncoder{}
+			}
+		case "re":
+			x, y, w, h := args[0].Float64(), args[1].Float64(), args[2].Float64(), args[3].Float64()
+			rect := Rect{Min: Point{X: x, Y: y}, Max: Point{X: x + w, Y: y + h}}
+			currentRectText = getOrAdd(rect)
+		case "TJ":
+			text := ""
+			v := args[0]
+			for i := 0; i < v.Len(); i++ {
+				x := v.Index(i)
+				if x.Kind() == String {
+					text += enc.Decode(x.RawString())
+				}
+			}
+			currentRectText.S += text
+			do(currentPoint, currentRectText.S)
+		case "Tm":
+			currentPoint.X = args[4].Float64()
+			currentPoint.Y = args[5].Float64()
+		}
+	})
+	return texts
 }
 
 // Content returns the page's content.
