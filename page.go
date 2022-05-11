@@ -856,6 +856,14 @@ func (p Page) GetTextByRect(do func(currentPoint Point, accumText string)) []*Re
 			x, y, w, h := args[0].Float64(), args[1].Float64(), args[2].Float64(), args[3].Float64()
 			rect := Rect{Min: Point{X: x, Y: y}, Max: Point{X: x + w, Y: y + h}}
 			currentRectText = getOrAdd(rect)
+		case "Tj":
+			if len(args) != 1 {
+				panic("bad Tj operator")
+			}
+			if currentRectText != nil {
+				currentRectText.S += args[0].RawString()
+				do(currentPoint, currentRectText.S)
+			}
 		case "TJ":
 			text := ""
 			v := args[0]
@@ -865,8 +873,10 @@ func (p Page) GetTextByRect(do func(currentPoint Point, accumText string)) []*Re
 					text += enc.Decode(x.RawString())
 				}
 			}
-			currentRectText.S += text
-			do(currentPoint, currentRectText.S)
+			if currentRectText != nil {
+				currentRectText.S += text
+				do(currentPoint, currentRectText.S)
+			}
 		case "Tm":
 			currentPoint.X = args[4].Float64()
 			currentPoint.Y = args[5].Float64()
